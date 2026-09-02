@@ -49,6 +49,8 @@ private:
                        uint32_t room_id, uint32_t player_id, uint32_t server_tick);
     void send_snapshot(UdpServer* server, const GameRoom& room, const GameSnapshotPayload& snap);
     void send_event(UdpServer* server, const GameRoom& room, const GameEventPayload& event);
+    void send_chat(UdpServer* server, const GameRoom& room, const GameChatPayload& chat);
+    void send_match_state(UdpServer* server, const GameRoom& room);
     void send_pong(UdpServer* server, const GamePacket& ping_packet,
                    const sockaddr_in& peer, uint64_t server_recv_ns);
     static std::string peer_key(const sockaddr_in& peer);
@@ -56,6 +58,7 @@ private:
     uint32_t tick_interval_ms_;
     uint32_t next_room_id_;
     uint32_t next_player_id_;
+    uint32_t match_broadcast_counter_ = 0;
     std::unordered_map<uint32_t, GameRoom> rooms_;
     std::unordered_map<std::string, PlayerBinding> peer_index_;
 };

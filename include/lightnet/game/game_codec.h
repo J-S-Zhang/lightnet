@@ -5,7 +5,6 @@
 
 namespace lightnet {
 
-/// @brief 游戏 UDP 协议编解码
 class GameCodec {
 public:
     static Buffer encode(const GamePacket& packet);
@@ -37,7 +36,18 @@ public:
     static bool decode_pong(const GamePacket& packet, uint64_t* client_send,
                             uint64_t* server_recv, uint64_t* server_send);
 
-    /// @brief 构造带 payload 的完整包并编码为 Buffer
+    static void encode_chat(const GameChatPayload& in, std::vector<uint8_t>* out);
+    static bool decode_chat(const GamePacket& packet, GameChatPayload* out);
+
+    static void encode_weapon(const GameWeaponPayload& in, std::vector<uint8_t>* out);
+    static bool decode_weapon(const GamePacket& packet, GameWeaponPayload* out);
+
+    static void encode_match_state(const GameMatchStatePayload& in, std::vector<uint8_t>* out);
+    static bool decode_match_state(const GamePacket& packet, GameMatchStatePayload* out);
+
+    static void encode_profile(const GameProfilePayload& in, std::vector<uint8_t>* out);
+    static bool decode_profile(const GamePacket& packet, GameProfilePayload* out);
+
     static Buffer build_packet(GameMsgType type, uint32_t room_id, uint32_t player_id,
                                uint32_t seq, uint32_t tick,
                                const std::vector<uint8_t>& payload);

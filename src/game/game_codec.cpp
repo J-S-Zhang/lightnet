@@ -1,6 +1,8 @@
 #include "lightnet/game/game_codec.h"
 
+#include <algorithm>
 #include <cstring>
+#include <string>
 
 namespace lightnet {
 
@@ -261,6 +263,10 @@ void GameCodec::encode_snapshot(const GameSnapshotPayload& in, std::vector<uint8
         append_u16(out, pl.hp);
         append_u16(out, pl.state_flags);
         append_u32(out, pl.last_input_seq);
+        append_u8(out, pl.weapon_id);
+        append_u8(out, pl.pad0);
+        append_u16(out, pl.kills);
+        append_u16(out, pl.deaths);
     }
 }
 
@@ -288,7 +294,11 @@ bool GameCodec::decode_snapshot(const GamePacket& packet, GameSnapshotPayload* o
             !read_i16(p, end, &pl.pitch) ||
             !read_u16(p, end, &pl.hp) ||
             !read_u16(p, end, &pl.state_flags) ||
-            !read_u32(p, end, &pl.last_input_seq)) {
+            !read_u32(p, end, &pl.last_input_seq) ||
+            !read_u8(p, end, &pl.weapon_id) ||
+            !read_u8(p, end, &pl.pad0) ||
+            !read_u16(p, end, &pl.kills) ||
+            !read_u16(p, end, &pl.deaths)) {
             return false;
         }
         out->players.push_back(pl);
@@ -353,6 +363,82 @@ bool GameCodec::decode_pong(const GamePacket& packet, uint64_t* client_send,
     return read_u64(p, end, client_send) &&
            read_u64(p, end, server_recv) &&
            read_u64(p, end, server_send);
+}
+
+void GameCodec::encode_chat(const GameChatPayload& in, std::vector<uint8_t>* out) {
+    out->clear();
+    append_u32(out, in.sender_id);
+    const uint16_t n = static_cast<uint16_t>(std::min<size_t>(in.text.size(), 200));
+    append_u16(out, n);
+    for (uint16_t i = 0; i < n; ++i) {
+        append_u8(out, static_cast<uint8_t>(in.text[i]));
+    }
+}
+
+bool GameCodec::decode_chat(const GamePacket& packet, GameChatPayload* out) {
+    const uint8_t* p = payload_begin(packet);
+    const uint8_t* end = payload_end(packet);
+    uint16_t n = 0;
+    if (!read_u32(p, end, &out->sender_id) || !read_u16(p, end, &n)) return false;
+    if (p + n > end) return false;
+    out->text.assign(reinterpret_cast<const char*>(p), reinterpret_cast<const char*>(p) + n);
+    return true;
+}
+
+void GameCodec::encode_weapon(const GameWeaponPayload& in, std::vector<uint8_t>* out) {
+    out->clear();
+    append_u8(out, in.weapon_id);
+    append_u8(out, 0);
+    append_u8(out, 0);
+    append_u8(out, 0);
+}
+
+bool GameCodec::decode_weapon(const GamePacket& packet, GameWeaponPayload* out) {
+    const uint8_t* p = payload_begin(packet);
+    const uint8_t* end = payload_end(packet);
+    uint8_t pad = 0;
+    return read_u8(p, end, &out->weapon_id) &&
+           read_u8(p, end, &pad) &&
+           read_u8(p, end, &pad) &&
+           read_u8(p, end, &pad);
+}
+
+void GameCodec::encode_match_state(const GameMatchStatePayload& in, std::vector<uint8_t>* out) {
+    out->clear();
+    append_u32(out, in.time_left_sec);
+    append_u8(out, in.match_over);
+    append_u8(out, 0);
+    append_u8(out, 0);
+    append_u8(out, 0);
+}
+
+bool GameCodec::decode_match_state(const GamePacket& packet, GameMatchStatePayload* out) {
+    const uint8_t* p = payload_begin(packet);
+    const uint8_t* end = payload_end(packet);
+    uint8_t pad = 0;
+    return read_u32(p, end, &out->time_left_sec) &&
+           read_u8(p, end, &out->match_over) &&
+           read_u8(p, end, &pad) &&
+           read_u8(p, end, &pad) &&
+           read_u8(p, end, &pad);
+}
+
+void GameCodec::encode_profile(const GameProfilePayload& in, std::vector<uint8_t>* out) {
+    out->clear();
+    const uint16_t n = static_cast<uint16_t>(std::min<size_t>(in.name.size(), 32));
+    append_u16(out, n);
+    for (uint16_t i = 0; i < n; ++i) {
+        append_u8(out, static_cast<uint8_t>(in.name[i]));
+    }
+}
+
+bool GameCodec::decode_profile(const GamePacket& packet, GameProfilePayload* out) {
+    const uint8_t* p = payload_begin(packet);
+    const uint8_t* end = payload_end(packet);
+    uint16_t n = 0;
+    if (!read_u16(p, end, &n) || p + n > end) return false;
+    out->name.assign(reinterpret_cast<const char*>(p), reinterpret_cast<const char*>(p) + n);
+    return true;
 }
 
 Buffer GameCodec::build_packet(GameMsgType type, uint32_t room_id, uint32_t player_id,

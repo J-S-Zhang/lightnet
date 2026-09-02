@@ -4,6 +4,7 @@
 #include "lightnet/log/logger.h"
 #include "lightnet/net/socket_ops.h"
 
+#include <algorithm>
 #include <chrono>
 
 namespace lightnet {
@@ -165,39 +166,69 @@ void GameRoomManager::handle_packet(const GamePacket& packet, const sockaddr_in&
             GameRoom* room = find_room(binding->room_id);
             if (!room) return;
 
-            uint16_t hp_before = 0;
-            uint32_t target_id = 0;
-            if (const GamePlayer* shooter = room->find_player(binding->player_id)) {
-                fire.origin_x = shooter->x;
-                fire.origin_y = shooter->y;
-                fire.origin_z = shooter->z;
-            }
-            for (const GamePlayer* p : room->all_players()) {
-                if (p->player_id != binding->player_id && p->alive) {
-                    target_id = p->player_id;
-                    hp_before = p->hp;
-                    break;
-                }
-            }
-
-            room->apply_fire(binding->player_id, fire);
+            uint16_t hp_after = 0;
+            bool killed = false;
+            const uint32_t target_id =
+                room->apply_fire(binding->player_id, fire, &hp_after, &killed);
             if (target_id != 0) {
-                const GamePlayer* target = room->find_player(target_id);
-                if (target && target->hp < hp_before) {
-                    GameEventPayload hit;
-                    hit.event_type = GameEventType::kHit;
-                    hit.target_id = target_id;
-                    hit.value = -kFireDamage;
-                    send_event(server, *room, hit);
-                    if (!target->alive) {
-                        GameEventPayload kill;
-                        kill.event_type = GameEventType::kKill;
-                        kill.target_id = target_id;
-                        kill.value = 0;
-                        kill.extra = binding->player_id;
-                        send_event(server, *room, kill);
-                    }
+                GameEventPayload hit;
+                hit.event_type = GameEventType::kHit;
+                hit.target_id = target_id;
+                hit.value = -kFireDamage;
+                hit.extra = binding->player_id;
+                send_event(server, *room, hit);
+                if (killed) {
+                    GameEventPayload kill;
+                    kill.event_type = GameEventType::kKill;
+                    kill.target_id = target_id;
+                    kill.value = 0;
+                    kill.extra = binding->player_id;
+                    send_event(server, *room, kill);
                 }
+            }
+            break;
+        }
+        case GameMsgType::kC2SChat: {
+            const auto binding = resolve_and_refresh_peer(peer, packet);
+            if (!binding) return;
+            GameChatPayload chat;
+            if (!GameCodec::decode_chat(packet, &chat)) return;
+            chat.sender_id = binding->player_id;
+            if (GameRoom* room = find_room(binding->room_id)) {
+                send_chat(server, *room, chat);
+            }
+            break;
+        }
+        case GameMsgType::kC2SWeapon: {
+            const auto binding = resolve_and_refresh_peer(peer, packet);
+            if (!binding) return;
+            GameWeaponPayload w;
+            if (!GameCodec::decode_weapon(packet, &w)) return;
+            if (GameRoom* room = find_room(binding->room_id)) {
+                room->apply_weapon(binding->player_id, w.weapon_id);
+            }
+            break;
+        }
+        case GameMsgType::kC2SRespawn: {
+            const auto binding = resolve_and_refresh_peer(peer, packet);
+            if (!binding) return;
+            if (GameRoom* room = find_room(binding->room_id)) {
+                room->apply_respawn(binding->player_id);
+                GameEventPayload ev;
+                ev.event_type = GameEventType::kRespawn;
+                ev.target_id = binding->player_id;
+                ev.value = 100;
+                send_event(server, *room, ev);
+            }
+            break;
+        }
+        case GameMsgType::kC2SProfile: {
+            const auto binding = resolve_and_refresh_peer(peer, packet);
+            if (!binding) return;
+            GameProfilePayload profile;
+            if (!GameCodec::decode_profile(packet, &profile)) return;
+            if (GameRoom* room = find_room(binding->room_id)) {
+                room->apply_profile(binding->player_id, profile.name);
             }
             break;
         }
@@ -212,10 +243,16 @@ void GameRoomManager::handle_packet(const GamePacket& packet, const sockaddr_in&
 }
 
 void GameRoomManager::tick_all(UdpServer* server) {
+    ++match_broadcast_counter_;
     for (auto& [room_id, room] : rooms_) {
         (void)room_id;
         const GameSnapshotPayload snap = room.tick();
         send_snapshot(server, room, snap);
+        // ~1Hz match state
+        if (tick_interval_ms_ > 0 &&
+            (match_broadcast_counter_ % std::max(1u, 1000u / tick_interval_ms_)) == 0) {
+            send_match_state(server, room);
+        }
     }
 }
 
@@ -262,6 +299,37 @@ void GameRoomManager::send_event(UdpServer* server, const GameRoom& room,
     for (const GamePlayer* player : room.all_players()) {
         Buffer buf = GameCodec::build_packet(
             GameMsgType::kS2CEvent,
+            room.id(),
+            player->player_id,
+            0,
+            room.server_tick(),
+            payload);
+        server->send_to(buf.peek(), buf.readable_bytes(), player->peer);
+    }
+}
+
+void GameRoomManager::send_chat(UdpServer* server, const GameRoom& room,
+                                const GameChatPayload& chat) {
+    std::vector<uint8_t> payload;
+    GameCodec::encode_chat(chat, &payload);
+    for (const GamePlayer* player : room.all_players()) {
+        Buffer buf = GameCodec::build_packet(
+            GameMsgType::kS2CChat,
+            room.id(),
+            player->player_id,
+            0,
+            room.server_tick(),
+            payload);
+        server->send_to(buf.peek(), buf.readable_bytes(), player->peer);
+    }
+}
+
+void GameRoomManager::send_match_state(UdpServer* server, const GameRoom& room) {
+    std::vector<uint8_t> payload;
+    GameCodec::encode_match_state(room.match_state(), &payload);
+    for (const GamePlayer* player : room.all_players()) {
+        Buffer buf = GameCodec::build_packet(
+            GameMsgType::kS2CMatchState,
             room.id(),
             player->player_id,
             0,
