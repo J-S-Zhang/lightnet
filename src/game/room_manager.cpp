@@ -29,7 +29,9 @@ GameRoomManager::JoinResult GameRoomManager::join(const sockaddr_in& peer,
     JoinResult result;
     const std::string key = peer_key(peer);
     if (peer_index_.count(key) > 0) {
-        result = peer_index_[key];
+        const PlayerBinding& binding = peer_index_[key];
+        result.room_id = binding.room_id;
+        result.player_id = binding.player_id;
         result.ok = true;
         return result;
     }
