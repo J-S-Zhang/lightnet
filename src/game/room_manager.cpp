@@ -26,7 +26,10 @@ GameRoomManager::GameRoomManager(uint32_t tick_interval_ms)
       next_player_id_(1) {}
 
 GameRoomManager::JoinResult GameRoomManager::join(const sockaddr_in& peer,
-                                                  uint32_t desired_room_id) {
+                                                  uint32_t /*desired_room_id*/) {
+    // 全服只维持一局：固定 room_id = 1，忽略客户端 desired_room_id。
+    constexpr uint32_t kSingleRoomId = 1;
+
     JoinResult result;
     const std::string key = peer_key(peer);
     if (peer_index_.count(key) > 0) {
@@ -37,23 +40,12 @@ GameRoomManager::JoinResult GameRoomManager::join(const sockaddr_in& peer,
         return result;
     }
 
-    uint32_t room_id = desired_room_id;
-    if (room_id == 0) {
-        for (auto& [id, room] : rooms_) {
-            if (room.player_count() > 0 && room.player_count() < 16) {
-                room_id = id;
-                break;
-            }
-        }
-    }
-    if (room_id == 0 || rooms_.find(room_id) == rooms_.end()) {
-        if (room_id == 0) {
-            room_id = next_room_id_++;
-        }
-        rooms_.emplace(room_id, GameRoom(room_id, tick_interval_ms_));
+    if (rooms_.find(kSingleRoomId) == rooms_.end()) {
+        rooms_.emplace(kSingleRoomId, GameRoom(kSingleRoomId, tick_interval_ms_));
+        next_room_id_ = 2;
     }
 
-    GameRoom* room = find_room(room_id);
+    GameRoom* room = find_room(kSingleRoomId);
     if (!room) {
         return result;
     }
@@ -63,8 +55,8 @@ GameRoomManager::JoinResult GameRoomManager::join(const sockaddr_in& peer,
         return result;
     }
 
-    peer_index_[key] = PlayerBinding{room_id, player_id};
-    result.room_id = room_id;
+    peer_index_[key] = PlayerBinding{kSingleRoomId, player_id};
+    result.room_id = kSingleRoomId;
     result.player_id = player_id;
     result.ok = true;
     return result;
@@ -77,9 +69,7 @@ void GameRoomManager::leave_by_peer(const sockaddr_in& peer) {
     }
     if (GameRoom* room = find_room(binding->room_id)) {
         room->remove_player(binding->player_id);
-        if (room->player_count() == 0) {
-            rooms_.erase(binding->room_id);
-        }
+        // 单对局模式：房间常驻，人不清空房间本身
     }
     peer_index_.erase(peer_key(peer));
 }
