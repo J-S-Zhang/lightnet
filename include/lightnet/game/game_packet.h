@@ -58,6 +58,12 @@ struct GameInputPayload {
     int16_t yaw = 0;    // degrees * 100
     int16_t pitch = 0;  // degrees * 100
     uint16_t buttons = 0;  // bit0 fire, bit1 jump, bit2 crouch
+    // 客户端上报位置（服务端做速度钳制后写入权威状态，便于与 Unity CharacterController 对齐）
+    float pos_x = 0;
+    float pos_y = 13.0f;
+    float pos_z = 0;
+    uint8_t has_pos = 0;
+    uint8_t pad[3] = {};
 };
 
 struct GameFirePayload {

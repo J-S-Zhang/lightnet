@@ -62,12 +62,53 @@ void GameRoom::apply_input(uint32_t player_id, const GameInputPayload& input) {
     if (input.input_seq <= player->last_input_seq) {
         return;
     }
+    const bool first_input = player->last_input_seq == 0;
     player->last_input_seq = input.input_seq;
     player->client_tick = input.client_tick;
     player->move_x = input.move_x;
     player->move_y = input.move_y;
     player->yaw = input.yaw;
     player->pitch = input.pitch;
+
+    if (input.has_pos) {
+        player->client_pos_authoritative = true;
+        const float dx = input.pos_x - player->x;
+        const float dy = input.pos_y - player->y;
+        const float dz = input.pos_z - player->z;
+        const float dist = std::sqrt(dx * dx + dy * dy + dz * dz);
+        // 首包允许直接对齐到客户端真实落点；之后限制单包位移
+        const float kMaxStep = first_input ? 100.0f : 3.0f;
+        if (dist <= kMaxStep) {
+            player->x = input.pos_x;
+            player->y = input.pos_y;
+            player->z = input.pos_z;
+        } else if (dist > 0.0001f) {
+            const float s = kMaxStep / dist;
+            player->x += dx * s;
+            player->y += dy * s;
+            player->z += dz * s;
+        }
+    } else {
+        player->client_pos_authoritative = false;
+    }
+}
+
+void GameRoom::simulate_movement(float dt_sec) {
+    for (auto& [id, player] : players_) {
+        (void)id;
+        if (!player.alive || match_over_) continue;
+        if (player.client_pos_authoritative) continue;
+        const float yaw_deg = static_cast<float>(player.yaw) / kYawScale;
+        const float yaw = yaw_deg * kDeg2Rad;
+        const float fx = std::sin(yaw);
+        const float fz = std::cos(yaw);
+        const float rx = std::cos(yaw);
+        const float rz = -std::sin(yaw);
+        const float nx = static_cast<float>(player.move_x) / 127.0f;
+        const float nz = static_cast<float>(player.move_y) / 127.0f;
+        player.x += (fx * nz + rx * nx) * kMoveSpeed * dt_sec;
+        player.z += (fz * nz + rz * nx) * kMoveSpeed * dt_sec;
+    }
 }
 
 uint32_t GameRoom::apply_fire(uint32_t shooter_id, const GameFirePayload& fire,
@@ -198,23 +239,6 @@ std::vector<const GamePlayer*> GameRoom::all_players() const {
         out.push_back(&player);
     }
     return out;
-}
-
-void GameRoom::simulate_movement(float dt_sec) {
-    for (auto& [id, player] : players_) {
-        (void)id;
-        if (!player.alive || match_over_) continue;
-        const float yaw_deg = static_cast<float>(player.yaw) / kYawScale;
-        const float yaw = yaw_deg * kDeg2Rad;
-        const float fx = std::sin(yaw);
-        const float fz = std::cos(yaw);
-        const float rx = std::cos(yaw);
-        const float rz = -std::sin(yaw);
-        const float nx = static_cast<float>(player.move_x) / 127.0f;
-        const float nz = static_cast<float>(player.move_y) / 127.0f;
-        player.x += (fx * nz + rx * nx) * kMoveSpeed * dt_sec;
-        player.z += (fz * nz + rz * nx) * kMoveSpeed * dt_sec;
-    }
 }
 
 void GameRoom::simulate_respawn(float dt_sec) {

@@ -170,20 +170,44 @@ void GameCodec::encode_input(const GameInputPayload& in, std::vector<uint8_t>* o
     append_i16(out, in.yaw);
     append_i16(out, in.pitch);
     append_u16(out, in.buttons);
+    append_f32(out, in.pos_x);
+    append_f32(out, in.pos_y);
+    append_f32(out, in.pos_z);
+    append_u8(out, in.has_pos);
+    append_u8(out, 0);
+    append_u8(out, 0);
+    append_u8(out, 0);
 }
 
 bool GameCodec::decode_input(const GamePacket& packet, GameInputPayload* out) {
     const uint8_t* p = payload_begin(packet);
     const uint8_t* end = payload_end(packet);
     uint16_t buttons = 0;
-    return read_u32(p, end, &out->input_seq) &&
-           read_u32(p, end, &out->client_tick) &&
-           read_i8(p, end, &out->move_x) &&
-           read_i8(p, end, &out->move_y) &&
-           read_i16(p, end, &out->yaw) &&
-           read_i16(p, end, &out->pitch) &&
-           read_u16(p, end, &buttons) &&
-           (out->buttons = buttons, true);
+    if (!(read_u32(p, end, &out->input_seq) &&
+          read_u32(p, end, &out->client_tick) &&
+          read_i8(p, end, &out->move_x) &&
+          read_i8(p, end, &out->move_y) &&
+          read_i16(p, end, &out->yaw) &&
+          read_i16(p, end, &out->pitch) &&
+          read_u16(p, end, &buttons))) {
+        return false;
+    }
+    out->buttons = buttons;
+    out->has_pos = 0;
+    // 兼容旧 16 字节 Input：无位置字段时仍可用
+    if (p + 16 <= end) {
+        uint8_t pad0 = 0, pad1 = 0, pad2 = 0;
+        if (!(read_f32(p, end, &out->pos_x) &&
+              read_f32(p, end, &out->pos_y) &&
+              read_f32(p, end, &out->pos_z) &&
+              read_u8(p, end, &out->has_pos) &&
+              read_u8(p, end, &pad0) &&
+              read_u8(p, end, &pad1) &&
+              read_u8(p, end, &pad2))) {
+            return false;
+        }
+    }
+    return true;
 }
 
 void GameCodec::encode_fire(const GameFirePayload& in, std::vector<uint8_t>* out) {

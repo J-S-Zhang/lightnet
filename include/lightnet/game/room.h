@@ -30,6 +30,7 @@ struct GamePlayer {
     uint16_t deaths = 0;
     std::string name;
     float respawn_timer = 0.f;
+    bool client_pos_authoritative = false;
 };
 
 class GameRoom {
